@@ -9,8 +9,7 @@ import NotFound from "./pages/NotFound";
 import { useState } from "react";
 
 const App = () => {
-  // Create a new QueryClient for each component instance
-  // This ensures the client is properly initialized with React's lifecycle
+
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {

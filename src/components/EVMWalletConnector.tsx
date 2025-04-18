@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { toast } from "@/hooks/use-toast";
@@ -20,31 +19,25 @@ const EVMWalletConnector: React.FC<EVMWalletConnectorProps> = ({
   const [fetchingBalances, setFetchingBalances] = useState(false);
 
   useEffect(() => {
-    const checkMetaMask = () => {
-      const installed = typeof window.ethereum !== "undefined";
-      setIsInstalled(installed);
-      
-      if (installed) {
-        setupEventListeners();
-        checkConnectionStatus();
-      }
-    };
+    const ethereum = typeof window !== "undefined" ? window.ethereum : undefined;
 
-    checkMetaMask();
+    if (ethereum?.isMetaMask) {
+      setIsInstalled(true);
+      setupEventListeners(ethereum);
+      checkConnectionStatus(ethereum);
+    }
 
     return () => {
-      if (window.ethereum) {
-        window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
-        window.ethereum.removeListener("chainChanged", handleChainChanged);
+      if (ethereum) {
+        ethereum.removeListener("accountsChanged", handleAccountsChanged);
+        ethereum.removeListener("chainChanged", handleChainChanged);
       }
     };
   }, []);
 
-  const setupEventListeners = () => {
-    if (!window.ethereum) return;
-
-    window.ethereum.on("accountsChanged", handleAccountsChanged);
-    window.ethereum.on("chainChanged", handleChainChanged);
+  const setupEventListeners = (ethereum: EthereumProvider) => {
+    ethereum.on("accountsChanged", handleAccountsChanged);
+    ethereum.on("chainChanged", handleChainChanged);
   };
 
   const handleAccountsChanged = (accounts: string[]) => {
@@ -62,11 +55,9 @@ const EVMWalletConnector: React.FC<EVMWalletConnectorProps> = ({
     }
   };
 
-  const checkConnectionStatus = async () => {
+  const checkConnectionStatus = async (ethereum: EthereumProvider) => {
     try {
-      if (!window.ethereum) return;
-      
-      const accounts = await window.ethereum.request({ method: "eth_accounts" });
+      const accounts = await ethereum.request({ method: "eth_accounts" });
       if (accounts.length > 0) {
         setAddress(accounts[0]);
         setIsConnected(true);
@@ -80,56 +71,52 @@ const EVMWalletConnector: React.FC<EVMWalletConnectorProps> = ({
 
   const fetchTokenBalances = async (accountAddress: string) => {
     if (fetchingBalances) return;
-    
+
     try {
-      console.log("Fetching token balances for EVM wallet:", accountAddress);
       setFetchingBalances(true);
-      
-      // Get network ID
-      const chainId = await window.ethereum.request({ method: "eth_chainId" });
-      console.log("Current chain ID:", chainId);
-      
-      // Create provider
+      const ethereum = window.ethereum;
+      if (!ethereum?.request) throw new Error("Ethereum provider not available");
+
+      const chainIdHex = await ethereum.request({ method: "eth_chainId" });
+      const chainId = parseInt(chainIdHex, 16);
+
       const provider = new ethers.JsonRpcProvider(
-        chainId === "0xaef3" 
-          ? "https://alfajores-forno.celo-testnet.org" 
+        chainId === 44787
+          ? "https://alfajores-forno.celo-testnet.org"
           : "https://eth-mainnet.g.alchemy.com/v2/demo"
       );
-      
-      // Get native token balance
+
       const nativeBalance = await provider.getBalance(accountAddress);
+
       const nativeToken: Token = {
         id: "native",
-        symbol: chainId === "0xaef3" ? "CELO" : "ETH",
-        name: chainId === "0xaef3" ? "Celo" : "Ethereum",
+        symbol: chainId === 44787 ? "CELO" : "ETH",
+        name: chainId === 44787 ? "Celo" : "Ethereum",
         balance: ethers.formatEther(nativeBalance),
         decimals: 18,
         address: "native",
         chain: "evm",
         logoURI: "",
-        priceUSD: "0"
+        priceUSD: "0",
       };
-      
-      // For this example, we'll just use the native token
-      // In a full implementation, you would fetch ERC20 tokens as well
-      
-      console.log("Setting EVM token balances:", [nativeToken]);
+
       setTokenBalances([nativeToken]);
     } catch (error) {
       console.error("Error fetching EVM token balances:", error);
-      // Create at least one empty token to verify the fetching code was run
-      const emptyToken: Token = {
+
+      const errorToken: Token = {
         id: "error",
         symbol: "ERR",
         name: "Error fetching tokens",
         balance: "0",
         decimals: 18,
         address: "",
-        chain: "ethereum",
+        chain: "evm",
         logoURI: "",
-        priceUSD: "0"
+        priceUSD: "0",
       };
-      setTokenBalances([emptyToken]);
+
+      setTokenBalances([errorToken]);
     } finally {
       setFetchingBalances(false);
     }
@@ -140,7 +127,7 @@ const EVMWalletConnector: React.FC<EVMWalletConnectorProps> = ({
     setIsConnected(false);
     onConnectChange();
     setTokenBalances([]);
-    
+
     toast({
       title: "Disconnected",
       description: "MetaMask disconnected",
@@ -148,25 +135,26 @@ const EVMWalletConnector: React.FC<EVMWalletConnectorProps> = ({
   };
 
   const connectWallet = async () => {
-    if (!isInstalled) {
+    const ethereum = typeof window !== "undefined" ? window.ethereum : undefined;
+
+    if (!ethereum?.isMetaMask || !ethereum.request) {
       window.open("https://metamask.io/download/", "_blank");
       return;
     }
 
     try {
-      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-      
+      const accounts = await ethereum.request({ method: "eth_requestAccounts" });
+
       if (accounts.length > 0) {
         setAddress(accounts[0]);
         setIsConnected(true);
         onConnectChange();
-        
+
         toast({
           title: "Connected",
           description: "MetaMask connected successfully!",
         });
-        
-        // Fetch balances after successful connection toast
+
         await fetchTokenBalances(accounts[0]);
       }
     } catch (error) {
@@ -183,9 +171,9 @@ const EVMWalletConnector: React.FC<EVMWalletConnectorProps> = ({
     <div className="flex items-center justify-between p-4 bg-white rounded-lg shadow-sm">
       <div className="flex items-center space-x-3">
         <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
-        <div className="h-9 w-9 rounded-full flex items-center justify-center font-bold text-xl bg-orange-600 text-white shadow-md">
-  M
-</div>
+          <div className="h-9 w-9 rounded-full flex items-center justify-center font-bold text-xl bg-orange-600 text-white shadow-md">
+            M
+          </div>
         </div>
         <div>
           <h3 className="font-medium text-orange-900">MetaMask</h3>
@@ -219,15 +207,17 @@ const EVMWalletConnector: React.FC<EVMWalletConnectorProps> = ({
   );
 };
 
-// Add these interfaces for TypeScript support
+
+interface EthereumProvider {
+  isMetaMask?: boolean;
+  request: (args: { method: string; params?: any[] }) => Promise<any>;
+  on: (event: string, callback: (...args: any[]) => void) => void;
+  removeListener: (event: string, callback: (...args: any[]) => void) => void;
+}
+
 declare global {
   interface Window {
-    ethereum?: {
-      isMetaMask?: boolean;
-      request: (args: { method: string; params?: any[] }) => Promise<any>;
-      on: (event: string, callback: (...args: any[]) => void) => void;
-      removeListener: (event: string, callback: (...args: any[]) => void) => void;
-    };
+    ethereum?: EthereumProvider;
   }
 }
 
